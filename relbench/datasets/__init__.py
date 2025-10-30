@@ -17,6 +17,7 @@ from relbench.datasets import (
     salt,
     stack,
     trial,
+    shipgraph,
 )
 
 dataset_registry = {}
@@ -129,3 +130,4 @@ register_dataset("rel-trial", trial.TrialDataset)
 register_dataset("rel-arxiv", arxiv.ArxivDataset)
 register_dataset("rel-salt", salt.SALTDataset)
 register_dataset("rel-ratebeer", ratebeer.RateBeerDataset)
+register_dataset("rel-shipgraph", shipgraph.ShipGraphDataSet)

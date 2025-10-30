@@ -19,6 +19,7 @@ from relbench.tasks import (
     ratebeer,
     stack,
     trial,
+    shipgraph,
 )
 
 task_registry = defaultdict(dict)
@@ -521,3 +522,5 @@ register_task(
         ("beer_ratings", "description_score"),
     ],
 )
+
+register_task("rel-shipgreaph", "delivery_prediction", shipgraph.DeliveryTimePrediction)
