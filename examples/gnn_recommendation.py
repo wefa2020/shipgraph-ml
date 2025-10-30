@@ -9,7 +9,7 @@ from typing import Dict, Tuple
 import numpy as np
 import torch
 import torch.nn.functional as F
-from model import Model
+from relbench.examples.model_1 import Model
 from text_embedder import GloveTextEmbedding
 from torch import Tensor
 from torch_frame import stype

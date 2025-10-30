@@ -106,9 +106,12 @@ class BaseTask:
 
         if split == "train":
             start = self.dataset.val_timestamp - self.timedelta
-            end = db.min_timestamp
+            end = db.min_timestamp - self.timedelta
             freq = -self.timedelta
 
+            delivery_time_start = self.dataset.train_timestamp
+            delivery_time_end = self.dataset.train_timestamp_end
+            
         elif split == "val":
             if self.dataset.val_timestamp + self.timedelta > db.max_timestamp:
                 raise RuntimeError(
@@ -117,13 +120,13 @@ class BaseTask:
                     "insufficient aggregation time."
                 )
 
-            start = self.dataset.val_timestamp
-            end = min(
-                self.dataset.val_timestamp
-                + self.timedelta * (self.num_eval_timestamps - 1),
-                self.dataset.test_timestamp - self.timedelta,
-            )
+            start = db.min_timestamp  - self.timedelta
+            end = self.dataset.val_timestamp_end 
+
             freq = self.timedelta
+
+            delivery_time_start = self.dataset.val_timestamp
+            delivery_time_end = self.dataset.val_timestamp_end
 
         elif split == "test":
             if self.dataset.test_timestamp + self.timedelta > db.max_timestamp:
@@ -133,13 +136,12 @@ class BaseTask:
                     "insufficient aggregation time."
                 )
 
-            start = self.dataset.test_timestamp
-            end = min(
-                self.dataset.test_timestamp
-                + self.timedelta * (self.num_eval_timestamps - 1),
-                db.max_timestamp - self.timedelta,
-            )
+            start = db.min_timestamp  - self.timedelta
+            end = self.dataset.test_timestamp_end
             freq = self.timedelta
+
+            delivery_time_start = self.dataset.test_timestamp
+            delivery_time_end = self.dataset.test_timestamp_end
 
         timestamps = pd.date_range(start=start, end=end, freq=freq)
 
@@ -149,7 +151,7 @@ class BaseTask:
                 f"({len(timestamps)} given)"
             )
 
-        table = self.make_table(db, timestamps)
+        table = self.make_table(db, timestamps, delivery_time_start ,delivery_time_end)
         table = self.filter_dangling_entities(table)
 
         return table

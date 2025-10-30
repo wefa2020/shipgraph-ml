@@ -7,14 +7,14 @@ import torch.nn.functional as F
 from torch_geometric.nn.dense.linear import Linear
 from torch_geometric.nn import MLP
 
-from codebook import VectorQuantizerEMA
+from .codebook import VectorQuantizerEMA
 from einops import rearrange
-from local_module import LocalModule
+from .local_module import LocalModule
 
 from torch_frame.data.stats import StatType
 from typing import Dict, Any, List
 
-from encoders import NeighborNodeTypeEncoder, NeighborHopEncoder, NeighborTimeEncoder, NeighborTfsEncoder, GNNPEEncoder
+from .encoders import NeighborNodeTypeEncoder, NeighborHopEncoder, NeighborTimeEncoder, NeighborTfsEncoder, GNNPEEncoder
 
 class RelGTLayer(nn.Module):
     def __init__(

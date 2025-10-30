@@ -32,7 +32,7 @@ from relbench.modeling.utils import get_stype_proposal
 from relbench.tasks import get_task
 
 # within this project
-from model import RelGT
+from model.regt import RelGT
 from utils.utils import GloveTextEmbedding, RelGTTokens
 
 torch.autograd.set_detect_anomaly(True)
@@ -79,12 +79,22 @@ parser.add_argument("--train_stage", type=str, default="finetune", choices=["fin
 
 args = parser.parse_args()
 
+#####################################
+#set up env variables 
+#export MASTER_ADDR=localhost
+#export MASTER_PORT=12355
+#export RANK=0
+#export LOCAL_RANK=0
+#export WORLD_SIZE=1
 ############################
+
+
+
 # 2. Initialize DDP and set device
 ############################
 dist.init_process_group(backend="nccl")
 # local_rank = args.local_rank
-local_rank = 0  #int(os.environ["LOCAL_RANK"])
+local_rank = int(os.environ.get("LOCAL_RANK", 0))  # Safer with default
 device = torch.device("cuda", local_rank)
 torch.cuda.set_device(device)
 
@@ -114,8 +124,8 @@ gpu_handle = init_gpu_utilization(local_rank)
 ############################
 # 3. Load dataset, task, and prepare data
 ############################
-dataset: Dataset = get_dataset(args.dataset, download=True)
-task: EntityTask = get_task(args.dataset, args.task, download=True)
+dataset: Dataset = get_dataset(args.dataset, download=False)
+task: EntityTask = get_task(args.dataset, args.task, download=False)
 print(task)
 
 stypes_cache_path = Path(f"{args.cache_dir}/{args.dataset}/stypes.json")

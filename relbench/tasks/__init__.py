@@ -523,4 +523,4 @@ register_task(
     ],
 )
 
-register_task("rel-shipgreaph", "delivery_prediction", shipgraph.DeliveryTimePrediction)
+register_task("rel-shipgraph", "delivery_prediction", shipgraph.DeliveryTimePrediction)

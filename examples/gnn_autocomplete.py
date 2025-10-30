@@ -8,7 +8,7 @@ from typing import Dict
 
 import numpy as np
 import torch
-from model import Model
+from relbench.examples.model_1 import Model
 from text_embedder import GloveTextEmbedding
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, L1Loss
 from torch_frame import stype

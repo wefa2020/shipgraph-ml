@@ -9,8 +9,14 @@ from relbench.utils import unzip_processor
 
 
 class ShipGraphDataSet(Dataset):
+    train_timestamp = pd.Timestamp("2025-10-16 18:00:00")
+    train_timestamp_end = pd.Timestamp("2025-10-16 18:30:00")
+
     val_timestamp = pd.Timestamp("2025-10-17 18:00:00")
-    test_timestamp = pd.Timestamp("2025-10-18 09:00:00")
+    val_timestamp_end = pd.Timestamp("2025-10-17 18:30:00")
+
+    test_timestamp = pd.Timestamp("2025-10-19 09:00:00")
+    test_timestamp_end = pd.Timestamp("2025-10-19 09:30:00")
 
     def make_db(self) -> Database:
         r"""Process the raw files into a database."""
@@ -33,16 +39,14 @@ class ShipGraphDataSet(Dataset):
         packages = pd.read_csv(os.path.join(path, "packages.csv"))
         sort_centers = pd.read_csv(os.path.join(path, "sort_centers.csv"))
         linehaul_edges = pd.read_csv(os.path.join(path, "linehaul_edges.csv"))
-        problem_edges = pd.read_csv(os.path.join(path, "problem_edges.csv"))
+        #problem_edges = pd.read_csv(os.path.join(path, "problem_edges.csv"))
         
         # Convert timestamps - creation_date is in ms, but min/max_event_time are ISO strings
-        packages['creation_date'] = pd.to_datetime(packages['creation_date'], unit='ms')
+        packages['creation_date'] = pd.to_datetime(packages['creation_date'])
         packages['min_event_time'] = pd.to_datetime(packages['min_event_time'])
         packages['max_event_time'] = pd.to_datetime(packages['max_event_time'])
-
-        # Replace commas with -> in plan_route if it exists
-        if 'plan_route' in packages.columns:
-            packages['plan_route'] = packages['plan_route'].str.replace(',', '->', regex=False)
+        packages['pdd'] = pd.to_datetime(packages['pdd'])
+        packages['delivered_date'] = pd.to_datetime(packages['delivered_date'])
 
         # Convert event_time for all edge dataframes
         delivery_edges['event_time'] = pd.to_datetime(delivery_edges['event_time'])
@@ -50,7 +54,7 @@ class ShipGraphDataSet(Dataset):
         induct_edges['event_time'] = pd.to_datetime(induct_edges['event_time'])
         missort_edges['event_time'] = pd.to_datetime(missort_edges['event_time'])
         linehaul_edges['event_time'] = pd.to_datetime(linehaul_edges['event_time'])
-        problem_edges['event_time'] = pd.to_datetime(problem_edges['event_time'])
+        #problem_edges['event_time'] = pd.to_datetime(problem_edges['event_time'])
 
         delivery_edges['plan_time'] = pd.to_datetime(delivery_edges['plan_time'])
         exit202_edges['plan_time'] = pd.to_datetime(exit202_edges['plan_time'])
@@ -69,17 +73,17 @@ class ShipGraphDataSet(Dataset):
 
         # Drop the Wikipedia URL as it is unique for each row
         packages.drop(
-            columns=["id", "has_cycle", "current_node", "is_delivered", "container_id"],
+            columns=["id","vertex_id", "has_cycle", "current_node", "is_delivered", "container_id","carrier_container_id", "current_node","is_return","vehicle_run_id"],
             inplace=True,
         )
 
         # Drop from_vertex_id and to_vertex_id from all edge tables
-        delivery_edges.drop(columns=['from_vertex_id', 'to_vertex_id'], inplace=True, errors='ignore')
-        exit202_edges.drop(columns=['from_vertex_id', 'to_vertex_id'], inplace=True, errors='ignore')
-        induct_edges.drop(columns=['from_vertex_id', 'to_vertex_id'], inplace=True, errors='ignore')
-        missort_edges.drop(columns=['from_vertex_id', 'to_vertex_id'], inplace=True, errors='ignore')
-        problem_edges.drop(columns=['from_vertex_id', 'to_vertex_id'], inplace=True, errors='ignore')
-        linehaul_edges.drop(columns=['from_vertex_id', 'to_vertex_id'], inplace=True, errors='ignore')
+        delivery_edges.drop(columns=['to_vertex'], inplace=True, errors='ignore')
+        exit202_edges.drop(columns=['to_vertex'], inplace=True, errors='ignore')
+        induct_edges.drop(columns=['to_vertex'], inplace=True, errors='ignore')
+        missort_edges.drop(columns=['to_vertex'], inplace=True, errors='ignore')
+        #problem_edges.drop(columns=['to_vertex'], inplace=True, errors='ignore')
+        linehaul_edges.drop(columns=['to_vertex_id'], inplace=True, errors='ignore')
 
         # Deduplicate on pk column for all dataframes
         packages = packages.drop_duplicates(subset=['pk'], keep='first')
@@ -88,7 +92,7 @@ class ShipGraphDataSet(Dataset):
         exit202_edges = exit202_edges.drop_duplicates(subset=['pk'], keep='first')
         induct_edges = induct_edges.drop_duplicates(subset=['pk'], keep='first')
         missort_edges = missort_edges.drop_duplicates(subset=['pk'], keep='first')
-        problem_edges = problem_edges.drop_duplicates(subset=['pk'], keep='first')
+        #problem_edges = problem_edges.drop_duplicates(subset=['pk'], keep='first')
         linehaul_edges = linehaul_edges.drop_duplicates(subset=['pk'], keep='first')
         sort_centers = sort_centers.drop_duplicates(subset=['pk'], keep='first')
      
@@ -148,15 +152,15 @@ class ShipGraphDataSet(Dataset):
             time_col="event_time",
         )
 
-        tables["problem_edges"] = Table(
-            df=pd.DataFrame(problem_edges),
-            fkey_col_to_pkey_table={
-                "from_pk": "packages",
-                "to_pk": "sort_centers",
-            },
-            pkey_col="pk",
-            time_col="event_time",
-        )
+        #tables["problem_edges"] = Table(
+        #    df=pd.DataFrame(problem_edges),
+        #    fkey_col_to_pkey_table={
+        #        "from_pk": "packages",
+        #        "to_pk": "sort_centers",
+        #    },
+        #    pkey_col="pk",
+        #    time_col="event_time",
+        #)
 
         tables["linehaul_edges"] = Table(
             df=pd.DataFrame(linehaul_edges),

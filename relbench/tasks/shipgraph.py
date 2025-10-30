@@ -77,13 +77,12 @@ class DeliveryTimePrediction(EntityTask):
                         ORDER BY e.event_time ASC
                     ) AS rn
                 FROM timestamp_df t
-                INNER JOIN packages p
                 INNER JOIN all_edges e 
                     ON e.event_time >= t.timestamp 
                 INNER JOIN packages p ON p.pk = e.from_pk
-                WHERE p.delivered_date >= {delivery_time_start}
-                    AND p.delivered_date < {delivery_time_end}
-                    AND p.min_event.time >= t.timestamp
+                WHERE p.delivered_date >= '{delivery_time_start}'
+                    AND p.delivered_date <= '{delivery_time_end}'
+                    AND p.min_event_time >= t.timestamp
                     AND p.max_event_time <= t.timestamp 
             )
             SELECT

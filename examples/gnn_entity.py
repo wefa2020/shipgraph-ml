@@ -9,7 +9,7 @@ from typing import Dict
 import numpy as np
 import pandas as pd
 import torch
-from model import Model
+from relbench.examples.model_1 import Model
 from sklearn.preprocessing import LabelEncoder
 from text_embedder import GloveTextEmbedding
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, L1Loss
