@@ -83,7 +83,7 @@ class DeliveryTimePrediction(EntityTask):
                 WHERE p.delivered_date >= '{delivery_time_start}'
                     AND p.delivered_date <= '{delivery_time_end}'
                     AND p.min_event_time >= t.timestamp
-                    AND p.max_event_time <= t.timestamp 
+                    AND p.max_event_time >= t.timestamp 
             )
             SELECT
                 timestamp,

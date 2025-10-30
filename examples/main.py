@@ -161,7 +161,7 @@ data = {
         precomputed_dir=f"{args.cache_dir}/precomputed/{args.dataset}/{args.task}",
         num_workers=args.num_workers,
         train_stage=args.train_stage)
-        for split in ["train", "val", "test"]
+        for split in ["test", "train", "val"]
     }
 
 ############################
