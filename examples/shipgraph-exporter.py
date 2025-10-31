@@ -35,7 +35,11 @@ PACKAGE_FETCH_BATCH_SIZE = 5000  # Batch size for fetching packages
 PACKAGE_BATCH_SIZE = 5000        # Batch size for fetching edges per package group
 MAX_WORKERS = 30                 # Number of parallel queries
 
-# Local Configuration
+# S3 Configuration
+S3_BUCKET = "relgt-data-export"
+S3_PREFIX = "shipgraph_export"  # Optional: folder within bucket
+
+# Local Configuration (for temporary files if needed)
 LOCAL_DIR = "/home/ubuntu/.cache/shipgraph"
 
 # ===================== THREAD-SAFE COUNTER =====================
@@ -65,37 +69,11 @@ def get_neptune_client():
         message_serializer=serializer.GraphSONSerializersV2d0()
     )
 
+def get_s3_client():
+    """Create S3 client"""
+    return boto3.client('s3')
+
 # ===================== DATA PROCESSING =====================
-
-def clean_plan_route(value):
-    """Convert JSON array string to -> separated string"""
-    if not value or value == '':
-        return ''
-    
-    try:
-        # If it's a JSON array string, parse and join with ->
-        if isinstance(value, str) and value.startswith('['):
-            parsed = json.loads(value)
-            if isinstance(parsed, list):
-                return '->'.join([str(item) for item in parsed])
-        return value
-    except:
-        return value
-
-def clean_container_problems(value):
-    """Convert JSON array string to space-separated string"""
-    if not value or value == '':
-        return ''
-    
-    try:
-        # If it's a JSON array string, parse and join with spaces
-        if isinstance(value, str) and value.startswith('['):
-            parsed = json.loads(value)
-            if isinstance(parsed, list):
-                return ' '.join([str(item) for item in parsed])
-        return value
-    except:
-        return value
 
 def flatten_value(value):
     """Flatten Neptune property values (which are returned as lists)"""
@@ -179,12 +157,7 @@ def fetch_packages_batch_tagged(start_date, end_date, skip_count, limit, dataset
             flat_pkg = {'vertex_id': pkg['vertex_id'], 'dataset': dataset_name}
             if pkg.get('properties'):
                 for key, value in pkg['properties'].items():
-                    flattened = flatten_value(value)
-                    # Special handling for plan_route
-                    if key == 'plan_route':
-                        flat_pkg[key] = clean_plan_route(flattened)
-                    else:
-                        flat_pkg[key] = flattened
+                    flat_pkg[key] = flatten_value(value)
             flattened_results.append(flat_pkg)
         
         elapsed = time.time() - start_time
@@ -458,12 +431,7 @@ def fetch_edges_for_packages(edge_type, package_vertex_ids, batch_num, total_bat
             # Merge properties
             if edge.get('properties'):
                 for key, value in edge['properties'].items():
-                    flattened = flatten_value(value)
-                    # Special handling for container_problems in Problem edges
-                    if edge_type == 'Problem' and key == 'container_problems':
-                        flat_edge[key] = clean_container_problems(flattened)
-                    else:
-                        flat_edge[key] = flattened
+                    flat_edge[key] = flatten_value(value)
             flattened_results.append(flat_edge)
         
         elapsed = time.time() - start_time
@@ -513,11 +481,73 @@ def fetch_all_edges_for_packages_parallel(edge_type, package_vertex_ids, max_wor
     print(f"[{edge_type}] ✓ Total edges fetched: {len(all_edges):,}")
     return all_edges
 
-# ===================== FILE OPERATIONS =====================
+# ===================== S3 FILE OPERATIONS =====================
+
+def list_s3_files(bucket, prefix):
+    """List all files in S3 bucket with given prefix"""
+    s3_client = get_s3_client()
+    try:
+        response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
+        if 'Contents' in response:
+            return [obj['Key'] for obj in response['Contents']]
+        return []
+    except Exception as e:
+        print(f"Error listing S3 files: {e}")
+        return []
+
+def clear_s3_folder(bucket, prefix):
+    """Delete all files in S3 bucket with given prefix"""
+    print(f"\nClearing S3 folder: s3://{bucket}/{prefix}/")
+    s3_client = get_s3_client()
+    
+    try:
+        files = list_s3_files(bucket, prefix)
+        if files:
+            print(f"Found {len(files)} file(s) to delete")
+            # Delete in batches of 1000 (S3 limit)
+            for i in range(0, len(files), 1000):
+                batch = files[i:i+1000]
+                delete_objects = {'Objects': [{'Key': key} for key in batch]}
+                s3_client.delete_objects(Bucket=bucket, Delete=delete_objects)
+            print(f"✓ Deleted {len(files)} file(s)")
+        else:
+            print("✓ No files to delete")
+    except Exception as e:
+        print(f"Note: {str(e)}")
+
+def write_parquet_to_s3(data, bucket, prefix, filename):
+    """Write DataFrame to S3 as Parquet"""
+    if not data:
+        print(f"⚠ No data for {filename}")
+        return False
+    
+    try:
+        df = pd.DataFrame(data)
+        
+        # Write to memory buffer
+        buffer = BytesIO()
+        df.to_parquet(buffer, engine='pyarrow', compression='snappy', index=False)
+        buffer.seek(0)
+        
+        # Upload to S3
+        s3_client = get_s3_client()
+        s3_key = f"{prefix}/{filename}" if prefix else filename
+        
+        s3_client.upload_fileobj(buffer, bucket, s3_key)
+        
+        file_size = buffer.getbuffer().nbytes
+        print(f"✓ Saved s3://{bucket}/{s3_key}: {len(data):,} rows ({file_size/1024/1024:.2f} MB)")
+        return True
+        
+    except Exception as e:
+        print(f"✗ Failed to save {filename} to S3: {str(e)}")
+        return False
+
+# ===================== LOCAL FILE OPERATIONS (OPTIONAL BACKUP) =====================
 
 def clear_local_folder(folder_path):
     """Delete all files in the local folder"""
-    print(f"\nClearing folder: {folder_path}")
+    print(f"\nClearing local folder: {folder_path}")
     try:
         if os.path.exists(folder_path):
             file_count = len([f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))])
@@ -537,8 +567,8 @@ def clear_local_folder(folder_path):
         print(f"Note: {str(e)}")
         os.makedirs(folder_path, exist_ok=True)
 
-def write_csv_to_local(data, folder_path, filename):
-    """Write DataFrame to local file as CSV with proper quoting"""
+def write_parquet_to_local(data, folder_path, filename):
+    """Write DataFrame to local file as Parquet"""
     if not data:
         print(f"⚠ No data for {filename}")
         return False
@@ -548,8 +578,8 @@ def write_csv_to_local(data, folder_path, filename):
         df = pd.DataFrame(data)
         file_path = os.path.join(folder_path, filename)
         
-        # Quote all fields to handle commas and special characters
-        df.to_csv(file_path, index=False, quoting=1, doublequote=True)
+        # Write as Parquet with compression
+        df.to_parquet(file_path, engine='pyarrow', compression='snappy', index=False)
         
         file_size = os.path.getsize(file_path)
         print(f"✓ Saved {filename}: {len(data):,} rows ({file_size/1024/1024:.2f} MB)")
@@ -561,9 +591,9 @@ def write_csv_to_local(data, folder_path, filename):
 # ===================== MAIN EXECUTION =====================
 
 def main():
-    """Main execution - fetch raw data only"""
+    """Main execution - fetch raw data and save to S3"""
     print("="*70)
-    print("NEPTUNE GRAPH EXPORT - RAW DATA WITH CLEAN FORMATTING")
+    print("NEPTUNE GRAPH EXPORT - S3 PARQUET FORMAT")
     print("="*70)
     print(f"Training range:    {TRAINING_START_DATE} <= delivered_date <= {TRAINING_END_DATE}")
     print(f"Validation range:  {VALIDATION_START_DATE} <= delivered_date <= {VALIDATION_END_DATE}")
@@ -571,24 +601,26 @@ def main():
     print(f"Package batch size: {PACKAGE_FETCH_BATCH_SIZE}")
     print(f"Edge batch size:    {PACKAGE_BATCH_SIZE} packages per edge query")
     print(f"Max workers:        {MAX_WORKERS}")
-    print(f"Local Directory:    {LOCAL_DIR}")
+    print(f"S3 Bucket:          s3://{S3_BUCKET}/{S3_PREFIX}/")
     print()
     print("FEATURES:")
     print("  ✅ Filter out returns (is_return=true)")
     print("  ✅ Flatten list values (remove [])")
-    print("  ✅ Convert plan_route to -> separated format")
-    print("  ✅ Convert container_problems to space-separated format")
-    print("  ✅ Proper CSV quoting for special characters")
+    print("  ✅ Keep plan_route in original format")
+    print("  ✅ Keep container_problems in original format")
+    print("  ✅ Parquet format with Snappy compression")
+    print("  ✅ Direct upload to S3")
+    print("  ✅ Preserves data types automatically")
     print("="*70)
     
     overall_start = time.time()
     
     try:
-        # Phase 0: Clear folder
+        # Phase 0: Clear S3 folder
         print("\n" + "="*70)
         print("PHASE 0: PREPARATION")
         print("="*70)
-        clear_local_folder(LOCAL_DIR)
+        clear_s3_folder(S3_BUCKET, S3_PREFIX)
         
         # Phase 1: Fetch shared nodes
         print("\n" + "="*70)
@@ -674,20 +706,20 @@ def main():
             linehaul_edges = future_linehaul.result()
             delivery_edges = future_delivery.result()
         
-        # Phase 4: Save files
+        # Phase 4: Save files to S3
         print("\n" + "="*70)
-        print("PHASE 4: SAVE FILES")
+        print("PHASE 4: SAVE FILES TO S3 (PARQUET FORMAT)")
         print("="*70)
         
-        write_csv_to_local(sort_centers, LOCAL_DIR, "sort_centers.csv")
-        write_csv_to_local(deliveries, LOCAL_DIR, "deliveries.csv")
-        write_csv_to_local(all_packages, LOCAL_DIR, "packages.csv")
-        write_csv_to_local(induct_edges, LOCAL_DIR, "induct_edges.csv")
-        write_csv_to_local(exit202_edges, LOCAL_DIR, "exit202_edges.csv")
-        write_csv_to_local(problem_edges, LOCAL_DIR, "problem_edges.csv")
-        write_csv_to_local(missort_edges, LOCAL_DIR, "missort_edges.csv")
-        write_csv_to_local(linehaul_edges, LOCAL_DIR, "linehaul_edges.csv")
-        write_csv_to_local(delivery_edges, LOCAL_DIR, "delivery_edges.csv")
+        write_parquet_to_s3(sort_centers, S3_BUCKET, S3_PREFIX, "sort_centers.parquet")
+        write_parquet_to_s3(deliveries, S3_BUCKET, S3_PREFIX, "deliveries.parquet")
+        write_parquet_to_s3(all_packages, S3_BUCKET, S3_PREFIX, "packages.parquet")
+        write_parquet_to_s3(induct_edges, S3_BUCKET, S3_PREFIX, "induct_edges.parquet")
+        write_parquet_to_s3(exit202_edges, S3_BUCKET, S3_PREFIX, "exit202_edges.parquet")
+        write_parquet_to_s3(problem_edges, S3_BUCKET, S3_PREFIX, "problem_edges.parquet")
+        write_parquet_to_s3(missort_edges, S3_BUCKET, S3_PREFIX, "missort_edges.parquet")
+        write_parquet_to_s3(linehaul_edges, S3_BUCKET, S3_PREFIX, "linehaul_edges.parquet")
+        write_parquet_to_s3(delivery_edges, S3_BUCKET, S3_PREFIX, "delivery_edges.parquet")
         
         summary_data = [{
             'export_date': datetime.now().isoformat(),
@@ -702,26 +734,38 @@ def main():
             'validation_packages': len(validation_packages),
             'test_packages': len(test_packages),
             'filter_returns': 'true',
-            'plan_route_format': 'arrow_separated',
-            'container_problems_format': 'space_separated',
-            'csv_quoting': 'all_fields'
+            'plan_route_format': 'original',
+            'container_problems_format': 'original',
+            'file_format': 'parquet',
+            'compression': 'snappy',
+            's3_bucket': S3_BUCKET,
+            's3_prefix': S3_PREFIX
         }]
         
-        write_csv_to_local(summary_data, LOCAL_DIR, "_export_summary.csv")
+        write_parquet_to_s3(summary_data, S3_BUCKET, S3_PREFIX, "_export_summary.parquet")
         
         overall_elapsed = time.time() - overall_start
         
         print("\n" + "="*70)
         print("✓ EXPORT COMPLETED")
         print("="*70)
+        print(f"\nS3 Location: s3://{S3_BUCKET}/{S3_PREFIX}/")
         print(f"\nTotal time: {overall_elapsed:.2f}s ({overall_elapsed/60:.2f} minutes)")
         print(f"\nData transformations applied:")
         print(f"  ✅ Filtered out return packages (is_return=true)")
         print(f"  ✅ Flattened list values (removed [])")
         print(f"  ✅ Converted datetime to ISO format")
-        print(f"  ✅ Converted plan_route: JSON array -> arrow separated (->)")
-        print(f"  ✅ Converted container_problems: JSON array -> space separated")
-        print(f"  ✅ Applied proper CSV quoting for all fields")
+        print(f"  ✅ Kept plan_route in original format")
+        print(f"  ✅ Kept container_problems in original format")
+        print(f"  ✅ Saved as Parquet with Snappy compression")
+        print(f"  ✅ Uploaded directly to S3")
+        print(f"  ✅ Data types preserved automatically")
+        
+        # List files in S3
+        print(f"\nFiles in S3:")
+        files = list_s3_files(S3_BUCKET, S3_PREFIX)
+        for file in sorted(files):
+            print(f"  - s3://{S3_BUCKET}/{file}")
         
     except Exception as e:
         print(f"\n❌ Error: {str(e)}")
